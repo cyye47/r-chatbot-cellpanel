@@ -91,8 +91,8 @@ ui <- page_sidebar(
             radioButtons(
               "scatter_color",
               NULL,
-              c("none", "SampleCollectionSite", "Mutations.NRAS", "Mutations.BRAF", "Mutations.PIK3CA", 
-              "EXPR.NRAS", "EXPR.BRAF", "EXPR.PIK3CA", "CNV.NRAS", "CNV.BRAF", "CNV.PIK3CA"),
+              c("none", "Tissue", "Mutations.KRAS", "Mutations.BRAF", "Mutations.PIK3CA", "Mutations.KRAS.PIK3CA",
+              "EXPR.KRAS", "EXPR.BRAF", "EXPR.PIK3CA", "CNV.KRAS", "CNV.BRAF", "CNV.PIK3CA"),
               inline = TRUE
             )
           )
@@ -100,8 +100,8 @@ ui <- page_sidebar(
       ),
       plotlyOutput("scatterplot")
     ),
-  
-  # 📊 Box plot for sample collection site
+
+  # 📊 Box plot for tissue site
   card(
       card_header(
         class = "d-flex justify-content-between align-items-center",
@@ -119,7 +119,7 @@ ui <- page_sidebar(
             radioButtons(
               "box_color",
               NULL,
-              c("none", "Mutations.NRAS", "Mutations.BRAF", "Mutations.PIK3CA", "Mutations.NRAS.PIK3CA"),
+              c("none", "Mutations.KRAS", "Mutations.BRAF", "Mutations.PIK3CA", "Mutations.KRAS.PIK3CA"),
               inline = TRUE
             )
           )
@@ -127,7 +127,7 @@ ui <- page_sidebar(
       ),
       plotlyOutput("boxplot")
     ),
-  
+
   # 🔍 Data table
   card(
     style = "height: 400px;",
@@ -177,7 +177,7 @@ server <- function(input, output, session) {
   output$total_cell_lines <- renderText({
     nrow(IC50_data())
   })
-  
+
   output$median_IC50 <- renderText({
     x <- median(10^IC50_data()$IC50, na.rm=T)
     paste0(formatC(x, format = "f", digits = 1, big.mark = ","), " nM")
@@ -198,18 +198,27 @@ server <- function(input, output, session) {
 
     data <- IC50_data()
     data <- data[!is.na(data$IC50), ]
-    # avoid missing data leading to 
+    # avoid missing data leading to
     # non-rendering plot
 
-    p <- plot_ly(data, x = ~IC50, y = ~AUC, type = "scatter", mode = "markers")
+    p <- plot_ly(data, x = ~IC50, y = ~AUC, type = "scatter", mode = "markers",
+                 text = ~paste0(
+                   "Cell line: ", Cell_line, "<br>",
+                   "Tissue: ", Tissue
+                 ),
+                 hoverinfo = "text"
+                 ) %>%
+      layout(
+        xaxis = list(title = "log10(IC50)")
+      )
 
     if (color != "none") {
     # get number of levels
       n_col <- length(unique(data[[color]]))
-      
+
       # use a palette with enough colors
       pal <- scales::hue_pal()(n_col)   # generates as many distinct hues as needed
-      
+
       p <- plot_ly(
         data,
         x = ~IC50,
@@ -217,18 +226,17 @@ server <- function(input, output, session) {
         color = as.formula(paste0("~", color)),
         colors = pal,                 # <- supply custom palette
         type = "scatter",
-        mode = "markers"
-      )
+        mode = "markers",
+        text = ~paste0(
+          "Cell line: ", Cell_line, "<br>",
+          "Tissue: ", Tissue
+        ),
+        hoverinfo = "text"
+      ) %>%
+        layout(
+          xaxis = list(title = "log10(IC50)")
+          )
     }
-
-
-    p <- p |> add_lines(
-      x = ~IC50, y = fitted(loess(AUC ~ IC50, data = data)),
-      line = list(color = "rgba(255, 0, 0, 0.5)"),
-      name = "LOESS", inherit = FALSE
-    )
-
-    p <- p |> layout(showlegend = FALSE)
 
     return(p)
   })
@@ -240,8 +248,8 @@ server <- function(input, output, session) {
   observeEvent(input$interpret_scatter, {
     explain_plot(chat, scatterplot(), model = gemini_model, .ctx = ctx)
   })
-  
-  
+
+
   # 📊 Box plot -----------------------------------------------------
   boxplot <- reactive({
     req(nrow(IC50_data()) > 0)
@@ -249,29 +257,29 @@ server <- function(input, output, session) {
     color_by <- input$box_color
 
     data <- IC50_data()
-    data <- data[!is.na(data$IC50), ] 
-    # avoid missing data leading to 
+    data <- data[!is.na(data$IC50), ]
+    # avoid missing data leading to
     # non-rendering plot
 
     # Calculate medians for sorting
     data_medians <- data |>
-      group_by(SampleCollectionSite) |>
+      group_by(Tissue) |>
       summarize(median_IC50 = median(IC50, na.rm = TRUE)) |>
       arrange(median_IC50)
 
     # Get the top 7 sites and shorten the long label
     top_7_sites <- head(data_medians, 7) |>
-      pull(SampleCollectionSite)
+      pull(Tissue)
 
     shortened_sites <- c(
       "haematopoietic_and_lymphoid_tissue" = "haem/lymph tissue"
     )
 
     data <- data |>
-      filter(SampleCollectionSite %in% top_7_sites) |>
+      filter(Tissue %in% top_7_sites) |>
       mutate(
-        SampleCollectionSite = factor(
-          SampleCollectionSite,
+        Tissue = factor(
+          Tissue,
           levels = top_7_sites,
           labels = sapply(top_7_sites, function(site) {
             if (site %in% names(shortened_sites)) {
@@ -289,14 +297,13 @@ server <- function(input, output, session) {
           factor("black")
         }
       )
-    
+
 
     # Create the ggplot with boxplot and jittered points
-    p <- ggplot(data, aes(x = SampleCollectionSite, y = IC50,
+    p <- ggplot(data, aes(x = Tissue, y = IC50,
       text = paste0(
         "Cell line: ", Cell_line, "<br>",
-        "IC50: ", round(IC50, 3), "<br>",
-        "Tissue: ", SampleCollectionSite
+        "Tissue: ", Tissue
       ))) +
       # Box plot layer
       geom_boxplot(outlier.shape=NA) +
@@ -309,7 +316,7 @@ server <- function(input, output, session) {
       # Adjust theme and labels
       labs(
         x = "Tissue Site",
-        y = "IC50",
+        y = "log10(IC50)",
         color = color_by
       ) +
       theme_minimal() +
@@ -343,12 +350,12 @@ server <- function(input, output, session) {
   })
 
   # 🔍 Data table ------------------------------------------------------------
-  
+
   output$table <- renderReactable({
     reactable(IC50_data(),pagination = FALSE, compact = TRUE)
   })
 
-  
+
   # ✨ Sidebot ✨ -------------------------------------------------------------
 
   append_output <- function(...) {
@@ -394,7 +401,7 @@ server <- function(input, output, session) {
   #' @param title Empty string
   reset_dashboard <- function(query, title) {
     append_output("\n```sql\n", query, "\n```\n\n")
-    
+
     if (!is.null(query)) {
       current_query(query)
     }
@@ -402,7 +409,7 @@ server <- function(input, output, session) {
       current_title(title)
     }
   }
-  
+
   #' Perform a SQL query on the data, and return the results as JSON.
   #' @param query A DuckDB SQL query; must be a SELECT statement.
   #' @return The results of the query as a JSON string.
@@ -419,7 +426,7 @@ server <- function(input, output, session) {
         stop(e)
       }
     )
-  
+
 
     tbl_html <- df_to_html(df, maxrows = 5)
     append_output(tbl_html, "\n\n")
@@ -438,14 +445,14 @@ server <- function(input, output, session) {
     query = type_string("A DuckDB SQL query; must be a SELECT statement."),
     title = type_string("A title to display at the top of the data dashboard, summarizing the intent of the SQL query.")
   ))
-  
+
   chat$register_tool(tool(
     reset_dashboard,
     "Remove all filters and reset dashboard to original state",
     query = type_string(""),
     title = type_string("")
   ))
-  
+
   chat$register_tool(tool(
     query,
     "Perform a SQL query on the data, and return the results as JSON.",
