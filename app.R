@@ -59,15 +59,15 @@ ui <- page_sidebar(
       textOutput("total_cell_lines", inline = TRUE)
     ),
     value_box(
+      showcase = fa_i("person"),
+      "Total Tissue Types",
+      textOutput("total_tissue_types", inline = TRUE)
+    ),
+    value_box(
       showcase = fa_i("florin-sign"),
       "Median IC50",
       textOutput("median_IC50", inline = TRUE)
-    ),
-    value_box(
-      showcase = fa_i("arrow-trend-up"),
-      "Median AUC",
-      textOutput("median_AUC", inline = TRUE)
-    ),
+    )
   ),
   layout_columns(
     style = "min-height: 800px;",
@@ -178,14 +178,14 @@ server <- function(input, output, session) {
     nrow(IC50_data())
   })
 
+  output$total_tissue_types <- renderText({
+    unique(IC50_data()$Tissue) |>
+      length()
+  })
+
   output$median_IC50 <- renderText({
     x <- median(10^IC50_data()$IC50, na.rm=T)
     paste0(formatC(x, format = "f", digits = 1, big.mark = ","), " nM")
-  })
-
-  output$median_AUC <- renderText({
-    x <- median(IC50_data()$AUC, na.rm=T)
-    formatC(x, format = "f", digits = 1, big.mark = ",")
   })
 
 
